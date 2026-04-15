@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ChatPDF</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--accent)">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="8" y1="13" x2="16" y2="13"/>
+        <line x1="8" y1="17" x2="13" y2="17"/>
+      </svg>
+    </div>
+    <span class="logo-name">Chat<span>PDF</span></span>
+  </div>
+  <div class="header-status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-label">No document loaded</span>
+  </div>
+</header>
+
+<div class="app">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-label">Document</div>
+
+    <!-- Drop zone -->
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <div class="drop-title">Drop your PDF here</div>
+      <div class="drop-sub">Supports PDF files up to 50 MB</div>
+      <button class="drop-btn" onclick="document.getElementById('file-input').click()">Browse files</button>
+      <input type="file" id="file-input" accept=".pdf" />
+    </div>
+
+    <!-- File preview -->
+    <div class="file-card" id="file-card">
+      <div class="file-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+      </div>
+      <div class="file-info">
+        <div class="file-name" id="file-name">document.pdf</div>
+        <div class="file-meta" id="file-meta">—</div>
+      </div>
+      <button class="file-remove" id="file-remove" title="Remove">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <button class="upload-btn" id="upload-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px">
+        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        <path d="M5 20h14"/>
+      </svg>
+      Upload & Process
+    </button>
+
+    <!-- Tips -->
+    <div class="tips-section">
+      <div class="sidebar-label" style="margin-bottom:10px">Tips</div>
+      <div class="tip-item"><div class="tip-num">1</div><span>Upload a PDF and wait for it to be processed before chatting</span></div>
+      <div class="tip-item"><div class="tip-num">2</div><span>Ask specific questions for more precise answers</span></div>
+      <div class="tip-item"><div class="tip-num">3</div><span>Try "Summarize this document" to get started</span></div>
+    </div>
+  </aside>
+
+  <!-- Chat -->
+  <main class="chat-area">
+    <div class="messages" id="messages">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-state-icon">PDF</div>
+        <h2>No document loaded</h2>
+        <p>Upload a PDF in the sidebar to start asking questions about its content.</p>
+        <div class="suggestion-chips">
+          <div class="chip" onclick="fillInput('Summarize this document')">Summarize document</div>
+          <div class="chip" onclick="fillInput('What are the key points?')">Key points</div>
+          <div class="chip" onclick="fillInput('List all topics covered')">List topics</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-bar">
+      <div class="input-wrap">
+        <textarea id="chat-input" placeholder="Ask anything about your PDF…" rows="1" disabled></textarea>
+        <button class="send-btn" id="send-btn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+      <div class="input-meta">
+        <div class="locked-note" id="locked-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          Upload a PDF to unlock chat
+        </div>
+        <span id="char-count"></span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script src="main.js"></script>
+</body>
+</html>
