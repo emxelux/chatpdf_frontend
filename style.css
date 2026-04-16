@@ -446,3 +446,141 @@
   /* Scrollbar for textarea */
   textarea::-webkit-scrollbar { width: 3px; }
   textarea::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+/* =========================================================
+   RESPONSIVE LAYOUT
+========================================================= */
+
+/* Allow mobile scrolling */
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Prevent horizontal scroll bugs */
+.app,
+.chat-area,
+.messages {
+  min-width: 0;
+}
+
+/* ================= MOBILE FIRST ================= */
+@media (max-width: 900px) {
+
+  /* Stack layout vertically */
+  .app {
+    flex-direction: column;
+  }
+
+  /* Sidebar becomes top panel */
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 16px;
+    gap: 16px;
+  }
+
+  /* Reduce header padding */
+  header {
+    padding: 0 16px;
+  }
+
+  /* Messages spacing */
+  .messages {
+    padding: 16px;
+    gap: 16px;
+  }
+
+  /* Chat bubbles fill screen better */
+  .message {
+    max-width: 100%;
+  }
+
+  .bubble {
+    max-width: 85%;
+    font-size: 14px;
+  }
+
+  /* Input bar smaller */
+  .input-bar {
+    padding: 12px;
+  }
+
+  textarea {
+    font-size: 15px; /* prevents iOS zoom */
+  }
+
+  /* Chips wrap nicely */
+  .suggestion-chips {
+    justify-content: flex-start;
+  }
+
+  /* Empty state resize */
+  .empty-state {
+    padding: 24px;
+  }
+}
+
+/* ================= SMALL PHONES ================= */
+@media (max-width: 600px) {
+
+  .logo-name {
+    font-size: 16px;
+  }
+
+  .header-status {
+    display: none;
+  }
+
+  .sidebar {
+    padding: 12px;
+  }
+
+  .drop-zone {
+    padding: 20px 12px;
+  }
+
+  .messages {
+    padding: 12px;
+  }
+
+  .bubble {
+    max-width: 92%;
+    padding: 12px 14px;
+  }
+
+  .avatar {
+    width: 26px;
+    height: 26px;
+    font-size: 10px;
+  }
+
+  .input-wrap {
+    padding: 8px 10px;
+  }
+
+  .send-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  #toast {
+    width: calc(100% - 40px);
+    text-align: center;
+    white-space: normal;
+  }
+}
+
+/* ================= LARGE SCREENS ================= */
+@media (min-width: 1400px) {
+
+  .messages {
+    padding-left: 80px;
+    padding-right: 80px;
+  }
+
+  .bubble {
+    max-width: 720px;
+  }
+}
+
