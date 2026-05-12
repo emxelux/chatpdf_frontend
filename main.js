@@ -1,5 +1,5 @@
 
-const BASE = 'https://emxeluxe-chatpdf.hf.space';
+const BASE = 'https://emxelux-chatmypdf.hf.space';
 
 let currentFile = null;
 let isUploaded = false;
@@ -69,7 +69,7 @@ async function uploadFile() {
   form.append('file', currentFile);
 
   try {
-    const res = await fetch(`${BASE}/upload/`, { method: 'POST', body: form });
+    const res = await fetch(`${BASE}/upload_pdf/`, { method: 'POST', body: form });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     isUploaded = true;
     unlockChat();
@@ -116,7 +116,7 @@ async function sendMessage() {
   const typingMsg = addTyping();
 
   try {
-    const res = await fetch(`${BASE}/ask/?question=${encodeURIComponent(q)}`, {
+    const res = await fetch(`${BASE}/ask/?query=${encodeURIComponent(q)}`, {
       method: 'POST',
       headers: { 'accept': 'application/json' }
     });
