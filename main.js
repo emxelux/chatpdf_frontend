@@ -1,222 +1,340 @@
+/* =============================================
+   ChatMyPDF — app.js
+   API Base: https://emxelux-chatmypdf.hf.space
+   Endpoints:
+     GET  /               → health check
+     POST /upload_pdf     → multipart file upload
+     POST /ask?query=...  → ask a question
+   ============================================= */
 
-const BASE = 'https://emxeluxe-chatpdf.hf.space';
+const API_BASE = 'https://emxelux-chatmypdf.hf.space';
 
-let currentFile = null;
-let isUploaded = false;
-let isThinking = false;
+// ── DOM refs ──────────────────────────────────
+const uploadZone   = document.getElementById('uploadZone');
+const fileInput    = document.getElementById('fileInput');
+const browseBtn    = document.getElementById('browseBtn');
+const uploadStatus = document.getElementById('uploadStatus');
+const fileName     = document.getElementById('fileName');
+const fileState    = document.getElementById('fileState');
+const fileBadge    = document.getElementById('fileBadge');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar  = document.getElementById('progressBar');
+const newChatBtn   = document.getElementById('newChatBtn');
+const statusDot    = document.getElementById('statusDot');
+const statusLabel  = document.getElementById('statusLabel');
 
-// ── DOM refs ──
-const dropZone    = document.getElementById('drop-zone');
-const fileInput   = document.getElementById('file-input');
-const fileCard    = document.getElementById('file-card');
-const fileName    = document.getElementById('file-name');
-const fileMeta    = document.getElementById('file-meta');
-const fileRemove  = document.getElementById('file-remove');
-const uploadBtn   = document.getElementById('upload-btn');
-const messagesEl  = document.getElementById('messages');
-const emptyState  = document.getElementById('empty-state');
-const chatInput   = document.getElementById('chat-input');
-const sendBtn     = document.getElementById('send-btn');
-const statusDot   = document.getElementById('status-dot');
-const statusLabel = document.getElementById('status-label');
-const lockedNote  = document.getElementById('locked-note');
-const charCount   = document.getElementById('char-count');
+const emptyState   = document.getElementById('emptyState');
+const messages     = document.getElementById('messages');
+const exampleChips = document.getElementById('exampleChips');
 
-// ── File handling ──
-fileInput.addEventListener('change', e => {
-  if (e.target.files[0]) pickFile(e.target.files[0]);
-});
+const queryInput   = document.getElementById('queryInput');
+const sendBtn      = document.getElementById('sendBtn');
+const toast        = document.getElementById('toast');
 
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault(); dropZone.classList.remove('dragover');
-  const f = e.dataTransfer.files[0];
-  if (f && f.type === 'application/pdf') pickFile(f);
-  else toast('Please drop a PDF file', 'error');
-});
+// ── State ─────────────────────────────────────
+let documentReady = false;
+let isWaiting     = false;
 
-function pickFile(f) {
-  currentFile = f;
-  isUploaded = false;
-  fileName.textContent = f.name;
-  fileMeta.textContent = formatBytes(f.size) + ' · PDF';
-  fileCard.classList.add('visible');
-  uploadBtn.classList.add('visible');
-  dropZone.style.display = 'none';
-  setStatus('idle');
+// ── Toast ─────────────────────────────────────
+let toastTimer;
+function showToast(msg, type = '') {
+  clearTimeout(toastTimer);
+  toast.textContent = msg;
+  toast.className = `toast ${type} show`;
+  toastTimer = setTimeout(() => {
+    toast.className = 'toast';
+  }, 3200);
 }
 
-fileRemove.addEventListener('click', () => {
-  currentFile = null; isUploaded = false;
-  fileCard.classList.remove('visible');
-  uploadBtn.classList.remove('visible');
-  dropZone.style.display = '';
+// ── Auto-resize textarea ──────────────────────
+queryInput.addEventListener('input', () => {
+  queryInput.style.height = 'auto';
+  queryInput.style.height = Math.min(queryInput.scrollHeight, 160) + 'px';
+});
+
+// ── Drag & drop ───────────────────────────────
+uploadZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  uploadZone.classList.add('drag-over');
+});
+uploadZone.addEventListener('dragleave', () => {
+  uploadZone.classList.remove('drag-over');
+});
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFileSelect(file);
+});
+uploadZone.addEventListener('click', e => {
+  if (e.target !== browseBtn) fileInput.click();
+});
+browseBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  fileInput.click();
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFileSelect(fileInput.files[0]);
   fileInput.value = '';
-  lockChat();
-  setStatus('idle');
 });
 
-uploadBtn.addEventListener('click', uploadFile);
-
-async function uploadFile() {
-  if (!currentFile) return;
-  uploadBtn.disabled = true;
-  uploadBtn.innerHTML = `<span style="font-size:12px">Uploading…</span>`;
-  setStatus('loading');
-
-  const form = new FormData();
-  form.append('file', currentFile);
-
-  try {
-    const res = await fetch(`${BASE}/upload/`, { method: 'POST', body: form });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    isUploaded = true;
-    unlockChat();
-    setStatus('active');
-    toast('PDF processed — start chatting!', 'success');
-    uploadBtn.innerHTML = `✓ Ready`;
-    uploadBtn.style.background = 'rgba(93,202,165,0.15)';
-    uploadBtn.style.color = 'var(--success)';
-    uploadBtn.style.border = '1px solid rgba(93,202,165,0.3)';
-    uploadBtn.style.borderRadius = '8px';
-  } catch (err) {
-    toast('Upload failed: ' + err.message, 'error');
-    uploadBtn.disabled = false;
-    uploadBtn.innerHTML = 'Upload & Process';
-    setStatus('idle');
+// ── File validation & upload ──────────────────
+function handleFileSelect(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showToast('Please upload a PDF file.', 'error');
+    return;
   }
+  uploadFile(file);
 }
 
-// ── Chat ──
-chatInput.addEventListener('input', () => {
-  chatInput.style.height = 'auto';
-  chatInput.style.height = Math.min(chatInput.scrollHeight, 140) + 'px';
-  charCount.textContent = chatInput.value.length > 0 ? chatInput.value.length + ' chars' : '';
-  sendBtn.disabled = !chatInput.value.trim() || isThinking;
-});
+async function uploadFile(file) {
+  // Show status card
+  fileName.textContent = file.name;
+  fileState.textContent = 'Uploading…';
+  fileBadge.className = 'file-badge loading';
+  uploadStatus.hidden = false;
+  progressWrap.hidden = false;
+  setProgress(0);
 
-chatInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-});
-sendBtn.addEventListener('click', sendMessage);
+  // Disable input while uploading
+  documentReady = false;
+  setDocumentReady(false);
 
-async function sendMessage() {
-  const q = chatInput.value.trim();
-  if (!q || isThinking || !isUploaded) return;
-
-  hideEmpty();
-  addMessage('user', q);
-  chatInput.value = '';
-  chatInput.style.height = 'auto';
-  charCount.textContent = '';
-  sendBtn.disabled = true;
-  isThinking = true;
-
-  const typingMsg = addTyping();
+  // Simulate upload progress (fake until server responds)
+  const fakeProgress = animateProgress(0, 70, 1200);
 
   try {
-    const res = await fetch(`${BASE}/ask/?question=${encodeURIComponent(q)}`, {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${API_BASE}/upload_pdf`, {
       method: 'POST',
-      headers: { 'accept': 'application/json' }
+      body: formData,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    removeTyping(typingMsg);
-    const answer = typeof data === 'string' ? data : (data.answer || data.response || data.message || JSON.stringify(data));
-    addMessage('ai', answer);
+
+    clearInterval(fakeProgress);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Upload failed.' }));
+      throw new Error(err.detail || `Server error ${res.status}`);
+    }
+
+    await res.json();
+    setProgress(100);
+
+    fileState.textContent = 'Ready to chat';
+    fileBadge.className = 'file-badge success';
+    progressWrap.hidden = true;
+
+    setDocumentReady(true);
+    showToast(`"${file.name}" processed successfully!`, 'success');
+
   } catch (err) {
-    removeTyping(typingMsg);
-    addMessage('ai', 'Sorry, something went wrong: ' + err.message);
-    toast('Request failed', 'error');
-  } finally {
-    isThinking = false;
-    sendBtn.disabled = !chatInput.value.trim();
+    clearInterval(fakeProgress);
+    setProgress(0);
+    fileState.textContent = 'Upload failed';
+    fileBadge.className = 'file-badge error';
+    progressWrap.hidden = true;
+    showToast(err.message || 'Upload failed. Try again.', 'error');
   }
 }
 
-function addMessage(role, text) {
-  const wrap = document.createElement('div');
-  wrap.className = 'message ' + (role === 'user' ? 'user' : 'ai');
-
-  const av = document.createElement('div');
-  av.className = 'avatar ' + (role === 'user' ? 'user-av' : 'ai-av');
-  av.textContent = role === 'user' ? 'U' : 'AI';
-
-  const bub = document.createElement('div');
-  bub.className = 'bubble';
-  bub.innerHTML = formatText(text);
-
-  wrap.appendChild(av);
-  wrap.appendChild(bub);
-  messagesEl.appendChild(wrap);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  return wrap;
+function setProgress(pct) {
+  progressBar.style.width = `${pct}%`;
 }
 
-function addTyping() {
-  const wrap = document.createElement('div');
-  wrap.className = 'message ai';
-  wrap.innerHTML = `
-    <div class="avatar ai-av">AI</div>
-    <div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
-  messagesEl.appendChild(wrap);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  return wrap;
-}
-function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
-
-function formatText(t) {
-  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>');
+function animateProgress(from, to, duration) {
+  const start = performance.now();
+  return setInterval(() => {
+    const elapsed = performance.now() - start;
+    const t = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - t, 3);
+    setProgress(from + (to - from) * eased);
+    if (t >= 1) clearInterval(this);
+  }, 16);
 }
 
-function fillInput(text) {
-  if (!isUploaded) { toast('Upload a PDF first', 'error'); return; }
-  chatInput.value = text;
-  chatInput.dispatchEvent(new Event('input'));
-  chatInput.focus();
-}
+function setDocumentReady(ready) {
+  documentReady = ready;
+  queryInput.disabled = !ready;
+  sendBtn.disabled = !ready || isWaiting;
+  newChatBtn.disabled = !ready;
 
-// ── UI helpers ──
-function unlockChat() {
-  chatInput.disabled = false;
-  chatInput.placeholder = 'Ask anything about your PDF…';
-  sendBtn.disabled = true;
-  lockedNote.style.display = 'none';
-}
-function lockChat() {
-  chatInput.disabled = true;
-  sendBtn.disabled = true;
-  lockedNote.style.display = 'flex';
-}
-function hideEmpty() {
-  if (emptyState && emptyState.parentNode) emptyState.parentNode.removeChild(emptyState);
-}
-function setStatus(state) {
-  if (state === 'active') {
+  // Example chips
+  document.querySelectorAll('.eq-chip').forEach(c => {
+    c.disabled = !ready;
+  });
+
+  if (ready) {
     statusDot.classList.add('active');
-    statusLabel.textContent = currentFile ? currentFile.name.replace(/\.pdf$/i,'') : 'Document ready';
-  } else if (state === 'loading') {
-    statusDot.classList.remove('active');
-    statusLabel.textContent = 'Processing…';
+    statusLabel.textContent = 'Document loaded';
   } else {
     statusDot.classList.remove('active');
     statusLabel.textContent = 'No document loaded';
   }
 }
 
-let toastTimer;
-function toast(msg, type = '') {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = 'show ' + type;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.className = '', 3000);
+// ── New chat ──────────────────────────────────
+newChatBtn.addEventListener('click', () => {
+  messages.innerHTML = '';
+  messages.hidden = true;
+  emptyState.hidden = false;
+  queryInput.value = '';
+  queryInput.style.height = 'auto';
+  showToast('Chat cleared. Same document is still active.');
+});
+
+// ── Send message ──────────────────────────────
+async function sendMessage(text) {
+  text = text.trim();
+  if (!text || !documentReady || isWaiting) return;
+
+  // Switch to chat view
+  emptyState.hidden = true;
+  messages.hidden = false;
+
+  // Add user bubble
+  appendMessage('user', text);
+
+  // Clear input
+  queryInput.value = '';
+  queryInput.style.height = 'auto';
+
+  // Show typing indicator
+  const typingEl = appendTyping();
+
+  // Lock UI
+  isWaiting = true;
+  sendBtn.disabled = true;
+  queryInput.disabled = true;
+
+  try {
+    const url = `${API_BASE}/ask?query=${encodeURIComponent(text)}`;
+    const res = await fetch(url, { method: 'POST' });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Request failed.' }));
+      throw new Error(err.detail || `Error ${res.status}`);
+    }
+
+    const data = await res.json();
+    typingEl.remove();
+    appendMessage('assistant', data.response || 'No response received.');
+
+  } catch (err) {
+    typingEl.remove();
+    appendMessage('assistant', `⚠️ ${err.message || 'Something went wrong. Please try again.'}`);
+  } finally {
+    isWaiting = false;
+    if (documentReady) {
+      sendBtn.disabled = false;
+      queryInput.disabled = false;
+      queryInput.focus();
+    }
+  }
 }
 
-function formatBytes(b) {
-  if (b < 1024) return b + ' B';
-  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
-  return (b/(1024*1024)).toFixed(1) + ' MB';
+// ── Message rendering ─────────────────────────
+function appendMessage(role, text) {
+  const wrap = document.createElement('div');
+  wrap.className = `message ${role}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.textContent = role === 'user' ? 'U' : '⬡';
+
+  const content = document.createElement('div');
+  content.className = 'message-content';
+
+  const roleEl = document.createElement('div');
+  roleEl.className = 'message-role';
+  roleEl.textContent = role === 'user' ? 'You' : 'ChatMyPDF';
+
+  const textEl = document.createElement('div');
+  textEl.className = 'message-text';
+  textEl.textContent = text;
+
+  content.appendChild(roleEl);
+  content.appendChild(textEl);
+
+  if (role === 'user') {
+    wrap.appendChild(content);
+    wrap.appendChild(avatar);
+  } else {
+    wrap.appendChild(avatar);
+    wrap.appendChild(content);
+  }
+
+  messages.appendChild(wrap);
+  scrollToBottom();
+  return wrap;
 }
+
+function appendTyping() {
+  const wrap = document.createElement('div');
+  wrap.className = 'message assistant';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.textContent = '⬡';
+
+  const content = document.createElement('div');
+  content.className = 'message-content';
+
+  const roleEl = document.createElement('div');
+  roleEl.className = 'message-role';
+  roleEl.textContent = 'ChatMyPDF';
+
+  const indicator = document.createElement('div');
+  indicator.className = 'typing-indicator';
+  for (let i = 0; i < 3; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'typing-dot';
+    indicator.appendChild(dot);
+  }
+
+  content.appendChild(roleEl);
+  content.appendChild(indicator);
+  wrap.appendChild(avatar);
+  wrap.appendChild(content);
+
+  messages.appendChild(wrap);
+  scrollToBottom();
+  return wrap;
+}
+
+function scrollToBottom() {
+  messages.scrollTo({ top: messages.scrollHeight, behavior: 'smooth' });
+}
+
+// ── Send triggers ─────────────────────────────
+sendBtn.addEventListener('click', () => sendMessage(queryInput.value));
+
+queryInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage(queryInput.value);
+  }
+});
+
+// ── Example chips ─────────────────────────────
+exampleChips.addEventListener('click', e => {
+  const chip = e.target.closest('.eq-chip');
+  if (chip && documentReady && !isWaiting) {
+    sendMessage(chip.dataset.q);
+  } else if (chip && !documentReady) {
+    showToast('Upload a PDF first!', 'error');
+  }
+});
+
+// ── Health check on load ──────────────────────
+(async () => {
+  try {
+    const res = await fetch(`${API_BASE}/`);
+    if (res.ok) {
+      console.log('API is live ✓');
+    }
+  } catch {
+    console.warn('API may be cold-starting. First request may be slow.');
+  }
+})();
