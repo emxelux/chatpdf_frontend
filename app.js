@@ -10,7 +10,7 @@ const state = {
   isGenerating: false,
   sidebarCollapsed: false,
   mobileTab: 'docs',
-  apiBase: 'http://localhost:8000'
+  apiBase: 'https://multimodal-rag-system-oozj.onrender.com'
 };
 
 const STORAGE_KEY = 'chatpdf_session';
@@ -1142,7 +1142,7 @@ function init() {
 async function handleLogin(e) {
   e.preventDefault();
 
-  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'http://localhost:8000';
+  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'https://multimodal-rag-system-oozj.onrender.com';
 
   const email = document.getElementById('loginEmail').value;
   const password = document.getElementById('loginPassword').value;
@@ -1175,7 +1175,7 @@ async function handleLogin(e) {
 async function handleRegister(e) {
   e.preventDefault();
 
-  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'http://localhost:8000';
+  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'https://multimodal-rag-system-oozj.onrender.com';
 
   const payload = {
     first_name: document.getElementById('regFirstName').value,
