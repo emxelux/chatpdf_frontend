@@ -73,8 +73,17 @@ async function apiGenerate(query, document_id) {
     body: JSON.stringify({ query, document_id })
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || 'Generation failed');
+  // Safely parse JSON — Render (and other hosts) sometimes return a
+  // non-JSON 502/504 body when the backend times out, which makes
+  // res.json() throw a SyntaxError, leaving the loading state stuck.
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`Server error (${res.status}). The backend may have timed out.`);
+  }
+
+  if (!res.ok) throw new Error(data?.detail || `Generation failed (${res.status})`);
   return data; // {query, document_id, answer, citations, results_count}
 }
 
@@ -594,11 +603,14 @@ function renderMessage(msg) {
   }
 
   const hasCitations = msg.citations?.length > 0;
-  const hasTable = msg.content?.toLowerCase().includes('table') && hasCitations;
-  const hasImage =
-    msg.content?.toLowerCase().includes('figure') ||
-    msg.content?.toLowerCase().includes('image') ||
-    msg.content?.toLowerCase().includes('chart');
+  // Use double optional chaining (?.) on both sides of the dot so that
+  // if content is null, undefined, or a non-string (e.g. a LangChain
+  // content array), the expression evaluates to undefined rather than
+  // throwing "toLowerCase is not a function", which would crash
+  // renderMessages() before it can set container.innerHTML.
+  const lc = typeof msg.content === 'string' ? msg.content.toLowerCase() : '';
+  const hasTable = lc.includes('table') && hasCitations;
+  const hasImage = lc.includes('figure') || lc.includes('image') || lc.includes('chart');
 
   let extraContent = '';
 
@@ -699,13 +711,26 @@ async function sendMessage() {
 
   try {
     const res = await apiGenerate(query, state.activeDocumentId);
+
+    // Normalise answer to a plain string.
+    // Newer langchain-google-genai versions can return response.content
+    // as a list of content blocks instead of a string, which makes
+    // msg.content.toLowerCase() throw and freeze the loading state.
+    let answer = res.answer;
+    if (Array.isArray(answer)) {
+      answer = answer.map(b => (typeof b === 'string' ? b : b?.text ?? '')).join('');
+    }
+    if (typeof answer !== 'string') {
+      answer = answer != null ? String(answer) : 'No answer returned.';
+    }
+
     const msgs = state.messages[state.activeDocumentId];
     const loadingIdx = msgs.findLastIndex(m => m.type === 'loading');
 
     if (loadingIdx !== -1) {
       msgs[loadingIdx] = {
         role: 'assistant',
-        content: res.answer,
+        content: answer,
         citations: res.citations || [],
         timestamp: Date.now(),
         type: 'text'
@@ -729,9 +754,12 @@ async function sendMessage() {
   } finally {
     state.isGenerating = false;
     document.getElementById('sendBtn').disabled = false;
-    saveSession();
+    // renderMessages FIRST — saveSession must never block the DOM update.
+    // If localStorage throws (quota exceeded, private browsing, etc.)
+    // the skeleton would stay forever otherwise.
     renderMessages();
     renderChatHeader();
+    try { saveSession(); } catch (_) {}
   }
 }
 
@@ -758,13 +786,22 @@ async function sendMessageWithQuery(query) {
 
   try {
     const res = await apiGenerate(query, state.activeDocumentId);
+
+    let answer = res.answer;
+    if (Array.isArray(answer)) {
+      answer = answer.map(b => (typeof b === 'string' ? b : b?.text ?? '')).join('');
+    }
+    if (typeof answer !== 'string') {
+      answer = answer != null ? String(answer) : 'No answer returned.';
+    }
+
     const msgs = state.messages[state.activeDocumentId];
     const idx = msgs.findLastIndex(m => m.type === 'loading');
 
     if (idx !== -1) {
       msgs[idx] = {
         role: 'assistant',
-        content: res.answer,
+        content: answer,
         citations: res.citations || [],
         timestamp: Date.now(),
         type: 'text'
@@ -789,9 +826,9 @@ async function sendMessageWithQuery(query) {
     state.isGenerating = false;
     document.getElementById('mobileSendBtn').disabled = false;
     document.getElementById('sendBtn').disabled = false;
-    saveSession();
     renderMessages();
     renderChatHeader();
+    try { saveSession(); } catch (_) {}
   }
 }
 
@@ -1175,7 +1212,7 @@ async function handleLogin(e) {
 async function handleRegister(e) {
   e.preventDefault();
 
-  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'https://multimodal-rag-system-oozj.onrender.com';
+  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'https://multimodal-rag-system-oozj.onrender.comge';
 
   const payload = {
     first_name: document.getElementById('regFirstName').value,
