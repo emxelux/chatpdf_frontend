@@ -292,6 +292,7 @@ function renderDocList() {
 
 function selectDocument(docId, switchToChat = false) {
   state.activeDocumentId = docId;
+
   try { renderDocList(); }    catch (_) {}
   try { renderPDFViewer(); }  catch (_) {}
   try { renderChatHeader(); } catch (_) {}
@@ -680,15 +681,9 @@ function addMessage(role, content, citations = [], docId, type = 'text') {
 }
 
 // ─── Fast in-place DOM helpers ───────────────────────────────────────────────
-// Previously sendMessage() called renderMessages() twice per exchange,
-// nuking and rebuilding the entire messages innerHTML and running a
-// full-document lucide.createIcons() scan both times.  With many messages
-// that reflow cost is what makes the response feel slow even after the
-// network has already returned the answer.
-//
-// These helpers append / replace individual nodes directly, touching only
-// the new element — no prior messages are re-rendered.
-// ─────────────────────────────────────────────────────────────────────────────
+// Old approach called renderMessages() twice per exchange, rebuilding the
+// entire innerHTML and running lucide.createIcons() across the full document.
+// These helpers append / replace individual nodes — no prior messages touched.
 
 function _msgNode(msg) {
   const tmp = document.createElement('div');
@@ -711,29 +706,22 @@ function appendChatMsg(msg) {
 }
 
 function replaceLoadingMsg(answer, citations) {
-  const msgData = {
-    role:'assistant', content:answer, citations,
-    timestamp:Date.now(), type:'text'
-  };
+  const data = { role:'assistant', content:answer, citations, timestamp:Date.now(), type:'text' };
   for (const id of ['messages', 'mobileMessages']) {
     const c = document.getElementById(id);
     if (!c) continue;
     const old = c.querySelector('#loadingMsg');
     if (!old) continue;
-    const el = _msgNode(msgData);
+    const el = _msgNode(data);
     if (el) { old.replaceWith(el); c.scrollTop = c.scrollHeight; }
   }
   requestAnimationFrame(() => lucide.createIcons());
 }
 
 function _normaliseAnswer(raw) {
-  // langchain-google-genai can return response.content as a list of
-  // content blocks on newer SDK versions instead of a plain string.
   if (Array.isArray(raw))
     return raw.map(b => typeof b === 'string' ? b : (b?.text ?? '')).join('');
-  if (typeof raw !== 'string')
-    return raw != null ? String(raw) : 'No answer returned.';
-  return raw;
+  return typeof raw === 'string' ? raw : (raw != null ? String(raw) : 'No answer returned.');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -743,15 +731,14 @@ async function sendMessage() {
   const query = input.value.trim();
   if (!query || !state.activeDocumentId || state.isGenerating) return;
 
-  input.value = '';
-  input.style.height = 'auto';
+  input.value = ''; input.style.height = 'auto';
   document.getElementById('charCount').textContent = '0';
   input.dispatchEvent(new Event('input'));
 
   const docId = state.activeDocumentId;
+  if (!state.messages[docId]) state.messages[docId] = [];
   const userMsg = { role:'user', content:query, citations:[], timestamp:Date.now(), type:'text' };
   const loadMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'loading' };
-  if (!state.messages[docId]) state.messages[docId] = [];
   state.messages[docId].push(userMsg, loadMsg);
 
   appendChatMsg(userMsg);
@@ -764,25 +751,16 @@ async function sendMessage() {
     const res    = await apiGenerate(query, docId);
     const answer = _normaliseAnswer(res.answer);
     const cites  = res.citations || [];
-
     const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
     if (idx !== -1)
-      state.messages[docId][idx] = {
-        role:'assistant', content:answer,
-        citations:cites, timestamp:Date.now(), type:'text'
-      };
-
+      state.messages[docId][idx] = { role:'assistant', content:answer, citations:cites, timestamp:Date.now(), type:'text' };
     replaceLoadingMsg(answer, cites);
-
   } catch (err) {
-    const errText = `Error: ${err.message}`;
+    const txt = `Error: ${err.message}`;
     const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
     if (idx !== -1)
-      state.messages[docId][idx] = {
-        role:'assistant', content:errText,
-        citations:[], timestamp:Date.now(), type:'text'
-      };
-    replaceLoadingMsg(errText, []);
+      state.messages[docId][idx] = { role:'assistant', content:txt, citations:[], timestamp:Date.now(), type:'text' };
+    replaceLoadingMsg(txt, []);
     showToast(err.message, 'error');
   } finally {
     state.isGenerating = false;
@@ -801,10 +779,10 @@ async function sendMobileMessage() {
 }
 
 async function sendMessageWithQuery(query) {
-  const docId   = state.activeDocumentId;
+  const docId = state.activeDocumentId;
+  if (!state.messages[docId]) state.messages[docId] = [];
   const userMsg = { role:'user', content:query, citations:[], timestamp:Date.now(), type:'text' };
   const loadMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'loading' };
-  if (!state.messages[docId]) state.messages[docId] = [];
   state.messages[docId].push(userMsg, loadMsg);
 
   appendChatMsg(userMsg);
@@ -818,25 +796,16 @@ async function sendMessageWithQuery(query) {
     const res    = await apiGenerate(query, docId);
     const answer = _normaliseAnswer(res.answer);
     const cites  = res.citations || [];
-
     const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
     if (idx !== -1)
-      state.messages[docId][idx] = {
-        role:'assistant', content:answer,
-        citations:cites, timestamp:Date.now(), type:'text'
-      };
-
+      state.messages[docId][idx] = { role:'assistant', content:answer, citations:cites, timestamp:Date.now(), type:'text' };
     replaceLoadingMsg(answer, cites);
-
   } catch (err) {
-    const errText = `Error: ${err.message}`;
+    const txt = `Error: ${err.message}`;
     const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
     if (idx !== -1)
-      state.messages[docId][idx] = {
-        role:'assistant', content:errText,
-        citations:[], timestamp:Date.now(), type:'text'
-      };
-    replaceLoadingMsg(errText, []);
+      state.messages[docId][idx] = { role:'assistant', content:txt, citations:[], timestamp:Date.now(), type:'text' };
+    replaceLoadingMsg(txt, []);
     showToast(err.message, 'error');
   } finally {
     state.isGenerating = false;
@@ -1075,77 +1044,64 @@ function escapeHTML(str) {
 
 function _esc(s) {
   return String(s ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function _inline(text) {
   if (!text) return '';
   let t = _esc(text);
-  t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-  t = t.replace(/\*\*(.+?)\*\*/g,     '<strong>$1</strong>');
-  t = t.replace(/\*(.+?)\*/g,         '<em>$1</em>');
-  t = t.replace(/__(.+?)__/g,         '<strong>$1</strong>');
-  t = t.replace(/_([^_\s][^_]*)_/g,   '<em>$1</em>');
-  t = t.replace(/`([^`]+)`/g,         '<code>$1</code>');
-  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" class="md-link">$1</a>');
+  t = t.replace(/\*\*\*(.+?)\*\*\*/g,'<strong><em>$1</em></strong>');
+  t = t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  t = t.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  t = t.replace(/__(.+?)__/g,'<strong>$1</strong>');
+  t = t.replace(/_([^_\s][^_]*)_/g,'<em>$1</em>');
+  t = t.replace(/`([^`]+)`/g,'<code>$1</code>');
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" class="md-link">$1</a>');
   return t;
 }
 
-function _parseTable(lines) {
+function _mdTable(lines) {
   const parseRow = l => l.split('|').slice(1,-1).map(c => c.trim());
   const isSep    = l => /^\|[\s\-:|]+\|$/.test(l.trim());
   const rows     = lines.filter(l => !isSep(l));
-  if (rows.length < 1) return lines.map(_esc).join('<br>');
+  if (!rows.length) return lines.map(_esc).join('<br>');
   const [hdr, ...body] = rows;
-  const thHTML = parseRow(hdr).map(h => `<th>${_inline(h)}</th>`).join('');
-  const tbHTML = body.map(r =>
+  const th = parseRow(hdr).map(h => `<th>${_inline(h)}</th>`).join('');
+  const tb = body.map(r =>
     `<tr>${parseRow(r).map(c => `<td>${_inline(c)}</td>`).join('')}</tr>`
   ).join('');
   return `<div class="md-table-wrap"><table class="md-table">` +
-    `<thead><tr>${thHTML}</tr></thead><tbody>${tbHTML}</tbody></table></div>`;
+         `<thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`;
 }
 
 function formatMarkdown(raw) {
   if (!raw || typeof raw !== 'string') return '';
-
-  const lines  = raw.split('\n');
-  const out    = [];
-  let   i      = 0;
-
+  const lines = raw.split('\n');
+  const out = [];
+  let i = 0;
   while (i < lines.length) {
     const line = lines[i];
 
-    /* ── fenced code block ─────────────────────────── */
+    // fenced code block
     if (line.startsWith('```')) {
-      const lang  = _esc(line.slice(3).trim());
-      const code  = [];
+      const lang = _esc(line.slice(3).trim());
+      const code = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        code.push(_esc(lines[i]));
-        i++;
-      }
-      const label = lang
-        ? `<span class="code-lang">${lang}</span>` : '';
-      out.push(
-        `<div class="code-block-wrap">${label}` +
-        `<pre><code>${code.join('\n')}</code></pre></div>`
-      );
+      while (i < lines.length && !lines[i].startsWith('```')) { code.push(_esc(lines[i])); i++; }
+      const label = lang ? `<span class="code-lang">${lang}</span>` : '';
+      out.push(`<div class="code-block-wrap">${label}<pre><code>${code.join('\n')}</code></pre></div>`);
       i++; continue;
     }
 
-    /* ── GFM table ─────────────────────────────────── */
+    // GFM table
     if (line.startsWith('|')) {
       const tbl = [];
-      while (i < lines.length && lines[i].startsWith('|')) {
-        tbl.push(lines[i]); i++;
-      }
-      out.push(_parseTable(tbl));
-      continue;
+      while (i < lines.length && lines[i].startsWith('|')) { tbl.push(lines[i]); i++; }
+      out.push(_mdTable(tbl)); continue;
     }
 
-    /* ── ATX heading ───────────────────────────────── */
+    // ATX heading
     const hm = line.match(/^(#{1,6})\s+(.+)$/);
     if (hm) {
       const lvl = hm[1].length;
@@ -1153,72 +1109,51 @@ function formatMarkdown(raw) {
       i++; continue;
     }
 
-    /* ── blockquote ────────────────────────────────── */
+    // blockquote
     if (line.startsWith('> ')) {
       const bq = [];
-      while (i < lines.length && lines[i].startsWith('> ')) {
-        bq.push(_inline(lines[i].slice(2))); i++;
-      }
+      while (i < lines.length && lines[i].startsWith('> ')) { bq.push(_inline(lines[i].slice(2))); i++; }
       out.push(`<blockquote class="md-quote">${bq.join('<br>')}</blockquote>`);
       continue;
     }
 
-    /* ── unordered list ────────────────────────────── */
+    // unordered list
     if (/^(\s*)[-*+] /.test(line)) {
       const items = [];
       while (i < lines.length && /^(\s*)[-*+] /.test(lines[i])) {
-        items.push(`<li>${_inline(lines[i].replace(/^\s*[-*+] /, ''))}</li>`);
-        i++;
+        items.push(`<li>${_inline(lines[i].replace(/^\s*[-*+] /,''))}</li>`); i++;
       }
-      out.push(`<ul class="md-ul">${items.join('')}</ul>`);
-      continue;
+      out.push(`<ul class="md-ul">${items.join('')}</ul>`); continue;
     }
 
-    /* ── ordered list ──────────────────────────────── */
+    // ordered list
     if (/^\d+[.)]\s/.test(line)) {
       const items = [];
       while (i < lines.length && /^\d+[.)]\s/.test(lines[i])) {
-        items.push(`<li>${_inline(lines[i].replace(/^\d+[.)]\s/, ''))}</li>`);
-        i++;
+        items.push(`<li>${_inline(lines[i].replace(/^\d+[.)]\s/,''))}</li>`); i++;
       }
-      out.push(`<ol class="md-ol">${items.join('')}</ol>`);
-      continue;
+      out.push(`<ol class="md-ol">${items.join('')}</ol>`); continue;
     }
 
-    /* ── horizontal rule ───────────────────────────── */
-    if (/^[-*_]{3,}\s*$/.test(line)) {
-      out.push('<hr class="md-hr">'); i++; continue;
-    }
+    // horizontal rule
+    if (/^[-*_]{3,}\s*$/.test(line)) { out.push('<hr class="md-hr">'); i++; continue; }
 
-    /* ── blank line ────────────────────────────────── */
-    if (line.trim() === '') {
-      i++; continue;
-    }
+    // blank line
+    if (!line.trim()) { i++; continue; }
 
-    /* ── paragraph ─────────────────────────────────── */
+    // paragraph
     const para = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() !== '' &&
-      !lines[i].startsWith('#')  &&
-      !lines[i].startsWith('|')  &&
-      !lines[i].startsWith('```') &&
-      !lines[i].startsWith('> ') &&
-      !/^(\s*)[-*+] /.test(lines[i]) &&
-      !/^\d+[.)]\s/.test(lines[i]) &&
-      !/^[-*_]{3,}\s*$/.test(lines[i])
-    ) {
+    while (i < lines.length && lines[i].trim() &&
+           !lines[i].startsWith('#') && !lines[i].startsWith('|') &&
+           !lines[i].startsWith('```') && !lines[i].startsWith('> ') &&
+           !/^(\s*)[-*+] /.test(lines[i]) && !/^\d+[.)]\s/.test(lines[i]) &&
+           !/^[-*_]{3,}\s*$/.test(lines[i])) {
       para.push(lines[i]); i++;
     }
-    if (para.length) {
-      out.push(`<p>${para.map(_inline).join('<br>')}</p>`);
-    }
+    if (para.length) out.push(`<p>${para.map(_inline).join('<br>')}</p>`);
   }
-
   return out.join('\n');
 }
-
-
 
 function copyToClipboard(btn, text) {
   navigator.clipboard.writeText(text).then(() => {

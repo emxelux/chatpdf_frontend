@@ -276,135 +276,45 @@ textarea:focus {
 .doc-item:hover:not(.active) {
   background: rgba(255,255,255,0.03);
 }
-/* ═══════════════════════════════════════════════════════════════
-   Markdown rendered output (msg-content)
-   These styles handle the full GFM subset the LLM now returns.
-   ═══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════
+   Markdown rendered output  (msg-content)
+   ═══════════════════════════════════════════════════════════ */
 
-/* ── Headings ────────────────────────────────────────────────── */
-.msg-content h1, .msg-content .md-h1 {
-  font-size: 1.2rem; font-weight: 700; color: #f4f4f5;
-  margin: 1.1rem 0 0.5rem; line-height: 1.3;
-}
-.msg-content h2, .msg-content .md-h2 {
-  font-size: 1.05rem; font-weight: 600; color: #e4e4e7;
-  margin: 0.9rem 0 0.4rem; padding-bottom: 0.25rem;
-  border-bottom: 1px solid #27272a; line-height: 1.35;
-}
-.msg-content h3, .msg-content .md-h3 {
-  font-size: 0.95rem; font-weight: 600; color: #d4d4d8;
-  margin: 0.75rem 0 0.35rem;
-}
-.msg-content h4, .msg-content .md-h4,
-.msg-content h5, .msg-content .md-h5,
-.msg-content h6, .msg-content .md-h6 {
-  font-size: 0.875rem; font-weight: 500; color: #a1a1aa;
-  margin: 0.6rem 0 0.25rem;
-}
-.msg-content h1:first-child,
-.msg-content h2:first-child,
-.msg-content h3:first-child { margin-top: 0; }
+/* Headings */
+.msg-content h1,.msg-content .md-h1{font-size:1.2rem;font-weight:700;color:#f4f4f5;margin:1rem 0 .45rem;line-height:1.3}
+.msg-content h2,.msg-content .md-h2{font-size:1.05rem;font-weight:600;color:#e4e4e7;margin:.85rem 0 .4rem;padding-bottom:.25rem;border-bottom:1px solid #27272a}
+.msg-content h3,.msg-content .md-h3{font-size:.95rem;font-weight:600;color:#d4d4d8;margin:.7rem 0 .3rem}
+.msg-content h4,.msg-content h5,.msg-content h6{font-size:.875rem;font-weight:500;color:#a1a1aa;margin:.6rem 0 .25rem}
+.msg-content h1:first-child,.msg-content h2:first-child,.msg-content h3:first-child{margin-top:0}
 
-/* ── GFM Tables ──────────────────────────────────────────────── */
-.md-table-wrap {
-  overflow-x: auto;
-  margin: 0.75rem 0;
-  border-radius: 10px;
-  border: 1px solid #3f3f46;
-}
-.md-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  min-width: 360px;
-}
-.md-table th {
-  background: #1e1e2e;
-  color: #a5b4fc;
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 9px 14px;
-  text-align: left;
-  border-bottom: 1px solid #3f3f46;
-  white-space: nowrap;
-}
-.md-table td {
-  padding: 8px 14px;
-  border-bottom: 1px solid #27272a;
-  color: #d4d4d8;
-  line-height: 1.55;
-  vertical-align: top;
-}
-.md-table tr:last-child td { border-bottom: none; }
-.md-table tr:hover td { background: #1a1a26; }
+/* Tables */
+.md-table-wrap{overflow-x:auto;margin:.7rem 0;border-radius:10px;border:1px solid #3f3f46}
+.md-table{width:100%;border-collapse:collapse;font-size:13px;min-width:320px}
+.md-table th{background:#1e1e2e;color:#a5b4fc;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:9px 14px;text-align:left;border-bottom:1px solid #3f3f46;white-space:nowrap}
+.md-table td{padding:8px 14px;border-bottom:1px solid #27272a;color:#d4d4d8;line-height:1.55;vertical-align:top}
+.md-table tr:last-child td{border-bottom:none}
+.md-table tr:hover td{background:#1a1a26}
 
-/* ── Lists ───────────────────────────────────────────────────── */
-.msg-content .md-ul,
-.msg-content .md-ol {
-  padding-left: 1.4rem;
-  margin: 0.5rem 0;
-}
-.msg-content .md-ul { list-style: disc; }
-.msg-content .md-ol { list-style: decimal; }
-.msg-content .md-ul li,
-.msg-content .md-ol li {
-  margin-bottom: 0.3rem;
-  line-height: 1.65;
-  color: #d4d4d8;
-}
+/* Lists */
+.msg-content .md-ul,.msg-content .md-ol{padding-left:1.4rem;margin:.45rem 0}
+.msg-content .md-ul{list-style:disc}
+.msg-content .md-ol{list-style:decimal}
+.msg-content .md-ul li,.msg-content .md-ol li{margin-bottom:.3rem;line-height:1.65;color:#d4d4d8}
 
-/* ── Blockquote ──────────────────────────────────────────────── */
-.msg-content .md-quote {
-  border-left: 3px solid #6366f1;
-  padding: 0.5rem 1rem;
-  margin: 0.75rem 0;
-  background: rgba(99,102,241,0.06);
-  border-radius: 0 8px 8px 0;
-  color: #a1a1aa;
-  font-style: italic;
-}
+/* Blockquote */
+.msg-content .md-quote{border-left:3px solid #6366f1;padding:.45rem 1rem;margin:.7rem 0;background:rgba(99,102,241,.06);border-radius:0 8px 8px 0;color:#a1a1aa;font-style:italic}
 
-/* ── Horizontal rule ─────────────────────────────────────────── */
-.msg-content .md-hr {
-  border: none;
-  border-top: 1px solid #3f3f46;
-  margin: 0.9rem 0;
-}
+/* HR */
+.msg-content .md-hr{border:none;border-top:1px solid #3f3f46;margin:.9rem 0}
 
-/* ── Code block with language label ─────────────────────────── */
-.code-block-wrap {
-  position: relative;
-  margin: 0.75rem 0;
-}
-.code-block-wrap .code-lang {
-  display: inline-block;
-  position: absolute;
-  top: 0; right: 0;
-  padding: 2px 8px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #6366f1;
-  background: rgba(99,102,241,0.12);
-  border-radius: 0 10px 0 6px;
-  font-family: 'JetBrains Mono', monospace;
-}
-.code-block-wrap pre {
-  margin: 0;
-  padding-top: 2rem;  /* room for the lang label */
-}
+/* Code block with language label */
+.code-block-wrap{position:relative;margin:.7rem 0}
+.code-block-wrap .code-lang{position:absolute;top:0;right:0;padding:2px 9px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#6366f1;background:rgba(99,102,241,.12);border-radius:0 10px 0 6px;font-family:'JetBrains Mono',monospace}
+.code-block-wrap pre{margin:0;padding-top:1.8rem}
 
-/* ── Inline links ────────────────────────────────────────────── */
-.msg-content .md-link {
-  color: #818cf8;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.msg-content .md-link:hover { color: #a5b4fc; }
+/* Links */
+.msg-content .md-link{color:#818cf8;text-decoration:underline;text-underline-offset:2px}
+.msg-content .md-link:hover{color:#a5b4fc}
 
-/* ── Wider assistant bubble for the new layout ───────────────── */
-/* Chat is now flex-1 so bubbles can breathe; cap at 90% of the panel */
-.msg-content { max-width: 100%; word-break: break-word; }
+/* Wide bubble — chat is now flex-1 so messages can use full width */
+.msg-content{max-width:100%;word-break:break-word}
