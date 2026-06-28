@@ -223,10 +223,29 @@
       </div>
     </aside>
 
-    <!-- ─── MIDDLE: PDF VIEWER ───────────────────────── -->
-    <main id="pdfPanel" class="hidden md:flex flex-col flex-1 bg-zinc-950 overflow-hidden">
+    <!-- ─── CENTER: CHAT (main panel) ─────────────────── -->
+    <div id="chatPanel" class="flex flex-col bg-zinc-900 border-r border-zinc-800 overflow-hidden flex-1">
+
+      <!-- Chat header -->
+      <div class="flex items-center justify-between h-14 px-4 border-b border-zinc-800 flex-shrink-0 bg-zinc-900">
+        <div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 bg-indigo-600/20 border border-indigo-500/30 rounded-lg flex items-center justify-center">
+            <i data-lucide="message-square" class="w-3.5 h-3.5 text-indigo-400"></i>
+          </div>
+          <div>
+            <p class="text-sm font-medium text-zinc-200">Ask Anything</p>
+            <p id="chatDocIndicator" class="text-xs text-zinc-600">Select a document to begin</p>
+          </div>
+        </div>
+        <button id="clearChatBtn" onclick="clearChat()" class="hidden text-zinc-600 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-zinc-800">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+
+    <!-- ─── RIGHT: DOC METRICS ────────────────────────── -->
+    <main id="pdfPanel" class="hidden md:flex flex-col bg-zinc-950 overflow-hidden flex-shrink-0 w-72 border-l border-zinc-800">
       <!-- PDF header -->
-      <div class="flex items-center justify-between h-14 px-5 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
+      <div class="flex items-center justify-between h-14 px-4 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
         <div class="flex items-center gap-3 min-w-0">
           <div id="pdfDocBadge" class="hidden items-center gap-2">
             <div class="w-2 h-2 bg-emerald-500 rounded-full flex-shrink-0"></div>
@@ -244,29 +263,10 @@
       </div>
 
       <!-- PDF content area -->
-      <div id="pdfContent" class="flex-1 overflow-y-auto p-5">
+      <div id="pdfContent" class="flex-1 overflow-y-auto p-3">
         <!-- Populated by JS -->
       </div>
     </main>
-
-    <!-- ─── RIGHT: CHAT PANEL ────────────────────────── -->
-    <div id="chatPanel" class="flex flex-col bg-zinc-900 border-l border-zinc-800 flex-shrink-0 overflow-hidden md:w-96 w-full">
-
-      <!-- Chat header -->
-      <div class="flex items-center justify-between h-14 px-4 border-b border-zinc-800 flex-shrink-0 bg-zinc-900">
-        <div class="flex items-center gap-2.5">
-          <div class="w-7 h-7 bg-indigo-600/20 border border-indigo-500/30 rounded-lg flex items-center justify-center">
-            <i data-lucide="message-square" class="w-3.5 h-3.5 text-indigo-400"></i>
-          </div>
-          <div>
-            <p class="text-sm font-medium text-zinc-200">Ask Anything</p>
-            <p id="chatDocIndicator" class="text-xs text-zinc-600">Select a document to begin</p>
-          </div>
-        </div>
-        <button id="clearChatBtn" onclick="clearChat()" class="hidden text-zinc-600 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-zinc-800">
-          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-        </button>
-      </div>
 
       <!-- Messages -->
       <div id="messages" class="flex-1 overflow-y-auto px-4 py-4 space-y-5 min-h-0">

@@ -73,18 +73,11 @@ async function apiGenerate(query, document_id) {
     body: JSON.stringify({ query, document_id })
   });
 
-  // Safely parse JSON — Render (and other hosts) sometimes return a
-  // non-JSON 502/504 body when the backend times out, which makes
-  // res.json() throw a SyntaxError, leaving the loading state stuck.
   let data;
-  try {
-    data = await res.json();
-  } catch {
-    throw new Error(`Server error (${res.status}). The backend may have timed out.`);
-  }
-
+  try { data = await res.json(); }
+  catch { throw new Error(`Server error (${res.status}). The backend may have timed out.`); }
   if (!res.ok) throw new Error(data?.detail || `Generation failed (${res.status})`);
-  return data; // {query, document_id, answer, citations, results_count}
+  return data;
 }
 
 // ═══════════════════════════════════════════════
@@ -162,8 +155,9 @@ function loadSession() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s.user) state.user = s.user;
-      if (s.apiBase) state.apiBase = s.apiBase;
+      if (s.user)             state.user             = s.user;
+      if (s.apiBase)          state.apiBase          = s.apiBase;
+      if (s.activeDocumentId) state.activeDocumentId = s.activeDocumentId;
     }
 
     const docs = localStorage.getItem(DOCS_KEY);
@@ -177,7 +171,8 @@ function loadSession() {
 function saveSession() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     user: state.user,
-    apiBase: state.apiBase
+    apiBase: state.apiBase,
+    activeDocumentId: state.activeDocumentId
   }));
   localStorage.setItem(DOCS_KEY, JSON.stringify(state.documents));
   localStorage.setItem(MSGS_KEY, JSON.stringify(state.messages));
@@ -297,15 +292,13 @@ function renderDocList() {
 
 function selectDocument(docId, switchToChat = false) {
   state.activeDocumentId = docId;
-
-  renderDocList();
-  renderPDFViewer();
-  renderChatHeader();
-  renderMessages();
+  try { renderDocList(); }    catch (_) {}
+  try { renderPDFViewer(); }  catch (_) {}
+  try { renderChatHeader(); } catch (_) {}
+  try { renderMessages(); }   catch (_) {}
   syncInputState();
-
   if (switchToChat) switchMobileTab('chat');
-  saveSession();
+  try { saveSession(); } catch (_) {}
 }
 
 function deleteDocument(e, docId) {
@@ -603,11 +596,6 @@ function renderMessage(msg) {
   }
 
   const hasCitations = msg.citations?.length > 0;
-  // Use double optional chaining (?.) on both sides of the dot so that
-  // if content is null, undefined, or a non-string (e.g. a LangChain
-  // content array), the expression evaluates to undefined rather than
-  // throwing "toLowerCase is not a function", which would crash
-  // renderMessages() before it can set container.innerHTML.
   const lc = typeof msg.content === 'string' ? msg.content.toLowerCase() : '';
   const hasTable = lc.includes('table') && hasCitations;
   const hasImage = lc.includes('figure') || lc.includes('image') || lc.includes('chart');
@@ -691,10 +679,68 @@ function addMessage(role, content, citations = [], docId, type = 'text') {
   });
 }
 
+// ─── Fast in-place DOM helpers ───────────────────────────────────────────────
+// Previously sendMessage() called renderMessages() twice per exchange,
+// nuking and rebuilding the entire messages innerHTML and running a
+// full-document lucide.createIcons() scan both times.  With many messages
+// that reflow cost is what makes the response feel slow even after the
+// network has already returned the answer.
+//
+// These helpers append / replace individual nodes directly, touching only
+// the new element — no prior messages are re-rendered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _msgNode(msg) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = renderMessage(msg).trim();
+  return tmp.firstElementChild;
+}
+
+function appendChatMsg(msg) {
+  for (const id of ['messages', 'mobileMessages']) {
+    const c = document.getElementById(id);
+    if (!c) continue;
+    const empty = document.getElementById('chatEmpty');
+    if (empty && c.contains(empty)) empty.style.display = 'none';
+    const el = _msgNode(msg);
+    if (!el) continue;
+    c.appendChild(el);
+    c.scrollTop = c.scrollHeight;
+  }
+  requestAnimationFrame(() => lucide.createIcons());
+}
+
+function replaceLoadingMsg(answer, citations) {
+  const msgData = {
+    role:'assistant', content:answer, citations,
+    timestamp:Date.now(), type:'text'
+  };
+  for (const id of ['messages', 'mobileMessages']) {
+    const c = document.getElementById(id);
+    if (!c) continue;
+    const old = c.querySelector('#loadingMsg');
+    if (!old) continue;
+    const el = _msgNode(msgData);
+    if (el) { old.replaceWith(el); c.scrollTop = c.scrollHeight; }
+  }
+  requestAnimationFrame(() => lucide.createIcons());
+}
+
+function _normaliseAnswer(raw) {
+  // langchain-google-genai can return response.content as a list of
+  // content blocks on newer SDK versions instead of a plain string.
+  if (Array.isArray(raw))
+    return raw.map(b => typeof b === 'string' ? b : (b?.text ?? '')).join('');
+  if (typeof raw !== 'string')
+    return raw != null ? String(raw) : 'No answer returned.';
+  return raw;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function sendMessage() {
   const input = document.getElementById('chatInput');
   const query = input.value.trim();
-
   if (!query || !state.activeDocumentId || state.isGenerating) return;
 
   input.value = '';
@@ -702,62 +748,45 @@ async function sendMessage() {
   document.getElementById('charCount').textContent = '0';
   input.dispatchEvent(new Event('input'));
 
-  addMessage('user', query, [], state.activeDocumentId);
-  addMessage('assistant', '', [], state.activeDocumentId, 'loading');
-  renderMessages();
+  const docId = state.activeDocumentId;
+  const userMsg = { role:'user', content:query, citations:[], timestamp:Date.now(), type:'text' };
+  const loadMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'loading' };
+  if (!state.messages[docId]) state.messages[docId] = [];
+  state.messages[docId].push(userMsg, loadMsg);
+
+  appendChatMsg(userMsg);
+  appendChatMsg(loadMsg);
 
   state.isGenerating = true;
   document.getElementById('sendBtn').disabled = true;
 
   try {
-    const res = await apiGenerate(query, state.activeDocumentId);
+    const res    = await apiGenerate(query, docId);
+    const answer = _normaliseAnswer(res.answer);
+    const cites  = res.citations || [];
 
-    // Normalise answer to a plain string.
-    // Newer langchain-google-genai versions can return response.content
-    // as a list of content blocks instead of a string, which makes
-    // msg.content.toLowerCase() throw and freeze the loading state.
-    let answer = res.answer;
-    if (Array.isArray(answer)) {
-      answer = answer.map(b => (typeof b === 'string' ? b : b?.text ?? '')).join('');
-    }
-    if (typeof answer !== 'string') {
-      answer = answer != null ? String(answer) : 'No answer returned.';
-    }
-
-    const msgs = state.messages[state.activeDocumentId];
-    const loadingIdx = msgs.findLastIndex(m => m.type === 'loading');
-
-    if (loadingIdx !== -1) {
-      msgs[loadingIdx] = {
-        role: 'assistant',
-        content: answer,
-        citations: res.citations || [],
-        timestamp: Date.now(),
-        type: 'text'
+    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
+    if (idx !== -1)
+      state.messages[docId][idx] = {
+        role:'assistant', content:answer,
+        citations:cites, timestamp:Date.now(), type:'text'
       };
-    }
+
+    replaceLoadingMsg(answer, cites);
+
   } catch (err) {
-    const msgs = state.messages[state.activeDocumentId];
-    const loadingIdx = msgs?.findLastIndex(m => m.type === 'loading');
-
-    if (loadingIdx !== -1) {
-      msgs[loadingIdx] = {
-        role: 'assistant',
-        content: `Error: ${err.message}`,
-        citations: [],
-        timestamp: Date.now(),
-        type: 'text'
+    const errText = `Error: ${err.message}`;
+    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
+    if (idx !== -1)
+      state.messages[docId][idx] = {
+        role:'assistant', content:errText,
+        citations:[], timestamp:Date.now(), type:'text'
       };
-    }
-
+    replaceLoadingMsg(errText, []);
     showToast(err.message, 'error');
   } finally {
     state.isGenerating = false;
     document.getElementById('sendBtn').disabled = false;
-    // renderMessages FIRST — saveSession must never block the DOM update.
-    // If localStorage throws (quota exceeded, private browsing, etc.)
-    // the skeleton would stay forever otherwise.
-    renderMessages();
     renderChatHeader();
     try { saveSession(); } catch (_) {}
   }
@@ -766,67 +795,53 @@ async function sendMessage() {
 async function sendMobileMessage() {
   const input = document.getElementById('mobileChatInput');
   const query = input.value.trim();
-
   if (!query || !state.activeDocumentId || state.isGenerating) return;
-
-  input.value = '';
-  input.style.height = 'auto';
-
+  input.value = ''; input.style.height = 'auto';
   await sendMessageWithQuery(query);
 }
 
 async function sendMessageWithQuery(query) {
-  addMessage('user', query, [], state.activeDocumentId);
-  addMessage('assistant', '', [], state.activeDocumentId, 'loading');
-  renderMessages();
+  const docId   = state.activeDocumentId;
+  const userMsg = { role:'user', content:query, citations:[], timestamp:Date.now(), type:'text' };
+  const loadMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'loading' };
+  if (!state.messages[docId]) state.messages[docId] = [];
+  state.messages[docId].push(userMsg, loadMsg);
+
+  appendChatMsg(userMsg);
+  appendChatMsg(loadMsg);
 
   state.isGenerating = true;
   document.getElementById('mobileSendBtn').disabled = true;
   document.getElementById('sendBtn').disabled = true;
 
   try {
-    const res = await apiGenerate(query, state.activeDocumentId);
+    const res    = await apiGenerate(query, docId);
+    const answer = _normaliseAnswer(res.answer);
+    const cites  = res.citations || [];
 
-    let answer = res.answer;
-    if (Array.isArray(answer)) {
-      answer = answer.map(b => (typeof b === 'string' ? b : b?.text ?? '')).join('');
-    }
-    if (typeof answer !== 'string') {
-      answer = answer != null ? String(answer) : 'No answer returned.';
-    }
-
-    const msgs = state.messages[state.activeDocumentId];
-    const idx = msgs.findLastIndex(m => m.type === 'loading');
-
-    if (idx !== -1) {
-      msgs[idx] = {
-        role: 'assistant',
-        content: answer,
-        citations: res.citations || [],
-        timestamp: Date.now(),
-        type: 'text'
+    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
+    if (idx !== -1)
+      state.messages[docId][idx] = {
+        role:'assistant', content:answer,
+        citations:cites, timestamp:Date.now(), type:'text'
       };
-    }
+
+    replaceLoadingMsg(answer, cites);
+
   } catch (err) {
-    const msgs = state.messages[state.activeDocumentId];
-    const idx = msgs?.findLastIndex(m => m.type === 'loading');
-
-    if (idx !== -1) {
-      msgs[idx] = {
-        role: 'assistant',
-        content: `Error: ${err.message}`,
-        citations: [],
-        timestamp: Date.now(),
-        type: 'text'
+    const errText = `Error: ${err.message}`;
+    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
+    if (idx !== -1)
+      state.messages[docId][idx] = {
+        role:'assistant', content:errText,
+        citations:[], timestamp:Date.now(), type:'text'
       };
-    }
-
+    replaceLoadingMsg(errText, []);
     showToast(err.message, 'error');
   } finally {
     state.isGenerating = false;
     document.getElementById('mobileSendBtn').disabled = false;
     document.getElementById('sendBtn').disabled = false;
-    renderMessages();
     renderChatHeader();
     try { saveSession(); } catch (_) {}
   }
@@ -1058,39 +1073,152 @@ function escapeHTML(str) {
     .replace(/"/g, '&quot;');
 }
 
-function formatMarkdown(text) {
-  if (!text) return '';
-
-  let html = escapeHTML(text);
-
-  // Code blocks
-  html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-  // Italic
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-  // Bullet lists
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
-
-  // Numbered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-  // Line breaks → paragraphs
-  const blocks = html.split(/\n\n+/);
-  html = blocks.map(b => {
-    if (b.startsWith('<pre') || b.startsWith('<ul') || b.startsWith('<ol')) return b;
-    return b.trim() ? `<p>${b.replace(/\n/g, '<br>')}</p>` : '';
-  }).join('');
-
-  return html;
+function _esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+function _inline(text) {
+  if (!text) return '';
+  let t = _esc(text);
+  t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  t = t.replace(/\*\*(.+?)\*\*/g,     '<strong>$1</strong>');
+  t = t.replace(/\*(.+?)\*/g,         '<em>$1</em>');
+  t = t.replace(/__(.+?)__/g,         '<strong>$1</strong>');
+  t = t.replace(/_([^_\s][^_]*)_/g,   '<em>$1</em>');
+  t = t.replace(/`([^`]+)`/g,         '<code>$1</code>');
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" target="_blank" class="md-link">$1</a>');
+  return t;
+}
+
+function _parseTable(lines) {
+  const parseRow = l => l.split('|').slice(1,-1).map(c => c.trim());
+  const isSep    = l => /^\|[\s\-:|]+\|$/.test(l.trim());
+  const rows     = lines.filter(l => !isSep(l));
+  if (rows.length < 1) return lines.map(_esc).join('<br>');
+  const [hdr, ...body] = rows;
+  const thHTML = parseRow(hdr).map(h => `<th>${_inline(h)}</th>`).join('');
+  const tbHTML = body.map(r =>
+    `<tr>${parseRow(r).map(c => `<td>${_inline(c)}</td>`).join('')}</tr>`
+  ).join('');
+  return `<div class="md-table-wrap"><table class="md-table">` +
+    `<thead><tr>${thHTML}</tr></thead><tbody>${tbHTML}</tbody></table></div>`;
+}
+
+function formatMarkdown(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+
+  const lines  = raw.split('\n');
+  const out    = [];
+  let   i      = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    /* ── fenced code block ─────────────────────────── */
+    if (line.startsWith('```')) {
+      const lang  = _esc(line.slice(3).trim());
+      const code  = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        code.push(_esc(lines[i]));
+        i++;
+      }
+      const label = lang
+        ? `<span class="code-lang">${lang}</span>` : '';
+      out.push(
+        `<div class="code-block-wrap">${label}` +
+        `<pre><code>${code.join('\n')}</code></pre></div>`
+      );
+      i++; continue;
+    }
+
+    /* ── GFM table ─────────────────────────────────── */
+    if (line.startsWith('|')) {
+      const tbl = [];
+      while (i < lines.length && lines[i].startsWith('|')) {
+        tbl.push(lines[i]); i++;
+      }
+      out.push(_parseTable(tbl));
+      continue;
+    }
+
+    /* ── ATX heading ───────────────────────────────── */
+    const hm = line.match(/^(#{1,6})\s+(.+)$/);
+    if (hm) {
+      const lvl = hm[1].length;
+      out.push(`<h${lvl} class="md-h${lvl}">${_inline(hm[2])}</h${lvl}>`);
+      i++; continue;
+    }
+
+    /* ── blockquote ────────────────────────────────── */
+    if (line.startsWith('> ')) {
+      const bq = [];
+      while (i < lines.length && lines[i].startsWith('> ')) {
+        bq.push(_inline(lines[i].slice(2))); i++;
+      }
+      out.push(`<blockquote class="md-quote">${bq.join('<br>')}</blockquote>`);
+      continue;
+    }
+
+    /* ── unordered list ────────────────────────────── */
+    if (/^(\s*)[-*+] /.test(line)) {
+      const items = [];
+      while (i < lines.length && /^(\s*)[-*+] /.test(lines[i])) {
+        items.push(`<li>${_inline(lines[i].replace(/^\s*[-*+] /, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ul class="md-ul">${items.join('')}</ul>`);
+      continue;
+    }
+
+    /* ── ordered list ──────────────────────────────── */
+    if (/^\d+[.)]\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+[.)]\s/.test(lines[i])) {
+        items.push(`<li>${_inline(lines[i].replace(/^\d+[.)]\s/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ol class="md-ol">${items.join('')}</ol>`);
+      continue;
+    }
+
+    /* ── horizontal rule ───────────────────────────── */
+    if (/^[-*_]{3,}\s*$/.test(line)) {
+      out.push('<hr class="md-hr">'); i++; continue;
+    }
+
+    /* ── blank line ────────────────────────────────── */
+    if (line.trim() === '') {
+      i++; continue;
+    }
+
+    /* ── paragraph ─────────────────────────────────── */
+    const para = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() !== '' &&
+      !lines[i].startsWith('#')  &&
+      !lines[i].startsWith('|')  &&
+      !lines[i].startsWith('```') &&
+      !lines[i].startsWith('> ') &&
+      !/^(\s*)[-*+] /.test(lines[i]) &&
+      !/^\d+[.)]\s/.test(lines[i]) &&
+      !/^[-*_]{3,}\s*$/.test(lines[i])
+    ) {
+      para.push(lines[i]); i++;
+    }
+    if (para.length) {
+      out.push(`<p>${para.map(_inline).join('<br>')}</p>`);
+    }
+  }
+
+  return out.join('\n');
+}
+
+
 
 function copyToClipboard(btn, text) {
   navigator.clipboard.writeText(text).then(() => {
