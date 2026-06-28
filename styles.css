@@ -276,6 +276,19 @@ textarea:focus {
 .doc-item:hover:not(.active) {
   background: rgba(255,255,255,0.03);
 }
+
+
+.stream-cursor {
+  display: inline-block;
+  color: #6366f1;
+  animation: cursorBlink 0.7s steps(1) infinite;
+  font-weight: 300;
+  margin-left: 1px;
+}
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
 /* ═══════════════════════════════════════════════════════════
    Markdown rendered output  (msg-content)
    ═══════════════════════════════════════════════════════════ */

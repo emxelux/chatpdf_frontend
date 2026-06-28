@@ -63,21 +63,58 @@ async function apiUpload(file) {
   return data; // {status, document_id, saved_path, chunks_indexed}
 }
 
-async function apiGenerate(query, document_id) {
-  const res = await fetch(`${state.apiBase}/generation`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${state.token}`
-    },
-    body: JSON.stringify({ query, document_id })
-  });
+async function streamGenerate(query, document_id, { onCitations, onToken, onDone, onError }) {
+  let response;
+  try {
+    response = await fetch(`${state.apiBase}/generation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.token}`
+      },
+      body: JSON.stringify({ query, document_id })
+    });
+  } catch (err) {
+    throw new Error('Network error — is the backend running?');
+  }
 
-  let data;
-  try { data = await res.json(); }
-  catch { throw new Error(`Server error (${res.status}). The backend may have timed out.`); }
-  if (!res.ok) throw new Error(data?.detail || `Generation failed (${res.status})`);
-  return data;
+  if (!response.ok) {
+    let detail = `Generation failed (${response.status})`;
+    try { const d = await response.json(); detail = d?.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+
+  const reader  = response.body.getReader();
+  const decoder = new TextDecoder();
+  let   buffer  = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE arrives as lines; split on \n\n (event boundary)
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();               // keep any incomplete event in buffer
+
+    for (const part of parts) {
+      for (const line of part.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+
+        if (raw === '[DONE]') { onDone?.(); return; }
+
+        try {
+          const evt = JSON.parse(raw);
+          if (evt.type === 'citations') onCitations?.(evt.citations, evt.results_count);
+          if (evt.type === 'token')     onToken?.(evt.token);
+        } catch { /* malformed chunk — skip */ }
+      }
+    }
+  }
+
+  onDone?.();   // fallback if [DONE] wasn't sent
 }
 
 // ═══════════════════════════════════════════════
@@ -520,151 +557,46 @@ function renderChatHeader() {
   }
 }
 
-function renderMessages() {
-  const msgs = state.messages[state.activeDocumentId] || [];
-  const container = document.getElementById('messages');
-  const mobileContainer = document.getElementById('mobileMessages');
-  const empty = document.getElementById('chatEmpty');
-
-  const html = msgs.length ? msgs.map(renderMessage).join('') : '';
-
-  if (container) {
-    container.innerHTML = html || '';
-    if (empty) {
-      empty.style.display = msgs.length ? 'none' : 'flex';
-      if (!msgs.length) container.appendChild(empty);
-    }
-  }
-
-  if (mobileContainer) {
-    mobileContainer.innerHTML = html;
-  }
-
-  // Scroll to bottom
-  setTimeout(() => {
-    if (container) container.scrollTop = container.scrollHeight;
-    if (mobileContainer) mobileContainer.scrollTop = mobileContainer.scrollHeight;
-  }, 50);
-
-  requestAnimationFrame(() => lucide.createIcons());
-}
-
-function renderMessage(msg) {
-  const time = new Date(msg.timestamp).toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-
-  if (msg.role === 'user') {
-    return `
-      <div class="flex justify-end gap-2 animate-slideUp">
-        <div class="flex flex-col items-end gap-1 max-w-[85%]">
-          <div class="bg-indigo-600 rounded-2xl rounded-tr-md px-4 py-2.5">
-            <p class="text-sm text-white leading-relaxed">${escapeHTML(msg.content)}</p>
-          </div>
-          <span class="text-xs text-zinc-700 px-1">${time}</span>
-        </div>
-        <div class="w-7 h-7 bg-indigo-700 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5">
-          ${state.user?.first_name?.[0]?.toUpperCase() || 'U'}
-        </div>
-      </div>`;
-  }
-
-  if (msg.type === 'loading') {
-    return `
-      <div class="flex gap-2.5 animate-slideUp" id="loadingMsg">
-        <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-          </svg>
-        </div>
-        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3 max-w-[85%]">
-          <div class="flex items-center gap-1.5 mb-3">
-            <div class="skeleton h-3 w-24 rounded"></div>
-          </div>
-          <div class="space-y-2">
-            <div class="skeleton h-2.5 w-full rounded"></div>
-            <div class="skeleton h-2.5 w-4/5 rounded"></div>
-            <div class="skeleton h-2.5 w-3/5 rounded"></div>
-          </div>
-          <div class="flex items-center gap-1 mt-3">
-            <span class="typing-dot"></span>
-            <span class="typing-dot"></span>
-            <span class="typing-dot"></span>
-          </div>
-        </div>
-      </div>`;
-  }
-
-  const hasCitations = msg.citations?.length > 0;
-  const lc = typeof msg.content === 'string' ? msg.content.toLowerCase() : '';
-  const hasTable = lc.includes('table') && hasCitations;
-  const hasImage = lc.includes('figure') || lc.includes('image') || lc.includes('chart');
-
-  let extraContent = '';
-
-  if (hasTable) {
-    extraContent += `
-      <div class="mt-3 border border-zinc-700 rounded-xl overflow-hidden">
-        <div class="flex items-center gap-2 px-3 py-2 bg-zinc-800/80 border-b border-zinc-700">
-          <i data-lucide="table" class="w-3 h-3 text-violet-400"></i>
-          <span class="text-xs text-zinc-400 font-medium">Referenced Table</span>
-        </div>
-        <table class="chat-table">
-          <thead>
-            <tr><th>Source</th><th>Page</th><th>Relevance</th></tr>
-          </thead>
-          <tbody>
-            ${(msg.citations || []).map(c => `
-            <tr>
-              <td class="text-zinc-300">${escapeHTML(c.source_name || '')}</td>
-              <td>${c.page ?? '—'}</td>
-              <td><span class="text-emerald-400 text-xs">High</span></td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`;
-  }
-
-  if (hasImage) {
-    extraContent += `
-      <div class="mt-3 flex items-center gap-3 bg-zinc-800/40 border border-zinc-700/50 rounded-xl p-3">
-        <div class="w-10 h-10 bg-zinc-800 rounded-lg flex items-center justify-center flex-shrink-0">
-          <i data-lucide="image" class="w-4 h-4 text-emerald-400"></i>
-        </div>
-        <div>
-          <p class="text-xs font-medium text-zinc-300">Visual content detected</p>
-          <p class="text-xs text-zinc-600">A figure or chart was referenced on this page</p>
-        </div>
-      </div>`;
-  }
-
+if (msg.type === 'streaming') {
   return `
     <div class="flex gap-2.5 animate-slideUp">
-      <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+      <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center
+                  justify-center flex-shrink-0 mt-0.5">
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+               a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
         </svg>
       </div>
-      <div class="flex-1 min-w-0 max-w-[92%]">
-        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3 relative group">
-          <div class="msg-content text-sm text-zinc-200 leading-relaxed">${formatMarkdown(msg.content)}</div>
-          ${extraContent}
-          <button onclick="copyToClipboard(this, ${JSON.stringify(msg.content)})"
-            class="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 transition-all p-1.5 rounded-lg hover:bg-zinc-700">
-            <i data-lucide="copy" class="w-3 h-3"></i>
-          </button>
+      <div class="flex-1 min-w-0">
+        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3">
+          <div class="msg-content text-sm text-zinc-200 leading-relaxed">
+            <span class="stream-cursor">▍</span>
+          </div>
         </div>
-        ${hasCitations ? `
-        <div class="flex flex-wrap gap-1.5 mt-2 px-1">
-          ${msg.citations.map(c => `
-            <span class="inline-flex items-center gap-1 text-xs bg-zinc-800 border border-zinc-700 text-zinc-500 px-2 py-0.5 rounded-full hover:border-indigo-500/40 hover:text-zinc-400 transition-colors cursor-default"
-              title="Page: ${c.page ?? 'N/A'}">
-              <i data-lucide="bookmark" class="w-2.5 h-2.5"></i>
-              ${escapeHTML(c.chunk_label)} · p.${c.page ?? '?'}
-            </span>`).join('')}
-        </div>` : ''}
-        <span class="text-xs text-zinc-700 px-1 mt-1 inline-block">${time}</span>
+        <div class="citation-area flex flex-wrap gap-1.5 mt-2 px-1"></div>
+      </div>
+    </div>`;
+}
+
+if (msg.type === 'streaming') {
+  return `
+    <div class="flex gap-2.5 animate-slideUp">
+      <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center
+                  justify-center flex-shrink-0 mt-0.5">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+               a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3">
+          <div class="msg-content text-sm text-zinc-200 leading-relaxed">
+            <span class="stream-cursor">▍</span>
+          </div>
+        </div>
+        <div class="citation-area flex flex-wrap gap-1.5 mt-2 px-1"></div>
       </div>
     </div>`;
 }
@@ -731,37 +663,89 @@ async function sendMessage() {
   const query = input.value.trim();
   if (!query || !state.activeDocumentId || state.isGenerating) return;
 
-  input.value = ''; input.style.height = 'auto';
+  input.value = '';
+  input.style.height = 'auto';
   document.getElementById('charCount').textContent = '0';
-  input.dispatchEvent(new Event('input'));
 
   const docId = state.activeDocumentId;
   if (!state.messages[docId]) state.messages[docId] = [];
-  const userMsg = { role:'user', content:query, citations:[], timestamp:Date.now(), type:'text' };
-  const loadMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'loading' };
-  state.messages[docId].push(userMsg, loadMsg);
 
+  // 1. Append user message immediately
+  const userMsg = { role:'user', content:query, citations:[], timestamp:Date.now(), type:'text' };
+  state.messages[docId].push(userMsg);
   appendChatMsg(userMsg);
-  appendChatMsg(loadMsg);
+
+  // 2. Append the assistant bubble with a live cursor — no skeleton needed
+  const asstMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'streaming' };
+  state.messages[docId].push(asstMsg);
+  appendChatMsg(asstMsg);
+
+  // Grab the live content div to update in-place as tokens arrive
+  const allMsgs    = document.querySelectorAll('#messages > div');
+  const streamEl   = allMsgs[allMsgs.length - 1]?.querySelector('.msg-content');
+  const citationEl = allMsgs[allMsgs.length - 1]?.querySelector('.citation-area');
 
   state.isGenerating = true;
   document.getElementById('sendBtn').disabled = true;
 
+  let fullText  = '';
+  let citations = [];
+  // Debounce markdown render: update DOM every ~40ms, not on every token
+  let renderScheduled = false;
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    setTimeout(() => {
+      if (streamEl) streamEl.innerHTML = formatMarkdown(fullText) + '<span class="stream-cursor">▍</span>';
+      renderScheduled = false;
+    }, 40);
+  }
+
   try {
-    const res    = await apiGenerate(query, docId);
-    const answer = _normaliseAnswer(res.answer);
-    const cites  = res.citations || [];
-    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
-    if (idx !== -1)
-      state.messages[docId][idx] = { role:'assistant', content:answer, citations:cites, timestamp:Date.now(), type:'text' };
-    replaceLoadingMsg(answer, cites);
+    await streamGenerate(query, docId, {
+      onCitations(cites) {
+        citations = cites;
+      },
+      onToken(token) {
+        fullText += token;
+        scheduleRender();
+      },
+      onDone() {
+        // Final render — full markdown, no cursor
+        if (streamEl) streamEl.innerHTML = formatMarkdown(fullText);
+
+        // Render citations
+        if (citationEl && citations.length) {
+          citationEl.innerHTML = citations.map(c => `
+            <span class="inline-flex items-center gap-1 text-xs bg-zinc-800 border border-zinc-700
+                         text-zinc-500 px-2 py-0.5 rounded-full cursor-default"
+                  title="Page: ${c.page ?? 'N/A'}">
+              <i data-lucide="bookmark" class="w-2.5 h-2.5"></i>
+              ${escapeHTML(c.chunk_label)} · p.${c.page ?? '?'}
+            </span>`).join('');
+          requestAnimationFrame(() => lucide.createIcons());
+        }
+
+        // Persist final message to state
+        const idx = state.messages[docId]?.findLastIndex(m => m.type === 'streaming');
+        if (idx !== -1)
+          state.messages[docId][idx] = {
+            role:'assistant', content:fullText,
+            citations, timestamp:Date.now(), type:'text'
+          };
+      }
+    });
+
   } catch (err) {
-    const txt = `Error: ${err.message}`;
-    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
+    if (streamEl) streamEl.innerHTML = `<span class="text-red-400">Error: ${escapeHTML(err.message)}</span>`;
+    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'streaming');
     if (idx !== -1)
-      state.messages[docId][idx] = { role:'assistant', content:txt, citations:[], timestamp:Date.now(), type:'text' };
-    replaceLoadingMsg(txt, []);
+      state.messages[docId][idx] = {
+        role:'assistant', content:`Error: ${err.message}`,
+        citations:[], timestamp:Date.now(), type:'text'
+      };
     showToast(err.message, 'error');
+
   } finally {
     state.isGenerating = false;
     document.getElementById('sendBtn').disabled = false;
@@ -769,7 +753,6 @@ async function sendMessage() {
     try { saveSession(); } catch (_) {}
   }
 }
-
 async function sendMobileMessage() {
   const input = document.getElementById('mobileChatInput');
   const query = input.value.trim();
