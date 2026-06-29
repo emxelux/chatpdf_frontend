@@ -117,6 +117,23 @@ async function streamGenerate(query, document_id, { onCitations, onToken, onDone
   onDone?.();   // fallback if [DONE] wasn't sent
 }
 
+async function apiGenerate(query, document_id) {
+  const res = await fetch(`${state.apiBase}/generation`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${state.token}`
+    },
+    body: JSON.stringify({ query, document_id })
+  });
+
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error(`Server error (${res.status}). The backend may have timed out.`); }
+  if (!res.ok) throw new Error(data?.detail || `Generation failed (${res.status})`);
+  return data;
+}
+
 // ═══════════════════════════════════════════════
 // AUTH HANDLERS
 // ═══════════════════════════════════════════════
@@ -167,24 +184,24 @@ function handleLogout() {
 // APP VIEWS
 // ═══════════════════════════════════════════════
 function showAuth() {
-  document.getElementById('authScreen').style.removeProperty('display');
-  document.getElementById('appShell').style.display = 'none';
-  requestAnimationFrame(() => lucide.createIcons());
+  document.getElementById('authScreen').style.setProperty('display', 'flex');
+  document.getElementById('appShell').style.setProperty('display', 'none', 'important');
+  requestAnimationFrame(() => { try { lucide.createIcons(); } catch (_) {} });
 }
 
 function showApp() {
-  document.getElementById('authScreen').style.display = 'none';
-  document.getElementById('appShell').style.removeProperty('display');
+  document.getElementById('authScreen').style.setProperty('display', 'none', 'important');
+  document.getElementById('appShell').style.setProperty('display', 'flex', 'important');
 
   saveSession();
-  renderSidebar();
-  renderDocList();
-  renderPDFViewer();
-  renderChatHeader();
-  renderMessages();
+  try { renderSidebar(); } catch (_) {}
+  try { renderDocList(); } catch (_) {}
+  try { renderPDFViewer(); } catch (_) {}
+  try { renderChatHeader(); } catch (_) {}
+  try { renderMessages(); } catch (_) {}
   syncInputState();
 
-  requestAnimationFrame(() => lucide.createIcons());
+  requestAnimationFrame(() => { try { lucide.createIcons(); } catch (_) {} });
 }
 
 function loadSession() {
@@ -557,46 +574,169 @@ function renderChatHeader() {
   }
 }
 
-if (msg.type === 'streaming') {
-  return `
-    <div class="flex gap-2.5 animate-slideUp">
-      <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center
-                  justify-center flex-shrink-0 mt-0.5">
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
-          <path stroke-linecap="round" stroke-linejoin="round"
-            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
-               a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-        </svg>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3">
-          <div class="msg-content text-sm text-zinc-200 leading-relaxed">
-            <span class="stream-cursor">▍</span>
-          </div>
-        </div>
-        <div class="citation-area flex flex-wrap gap-1.5 mt-2 px-1"></div>
-      </div>
-    </div>`;
+function renderMessages() {
+  const msgs = state.messages[state.activeDocumentId] || [];
+  const container = document.getElementById('messages');
+  const mobileContainer = document.getElementById('mobileMessages');
+  const empty = document.getElementById('chatEmpty');
+
+  const html = msgs.length ? msgs.map(renderMessage).join('') : '';
+
+  if (container) {
+    container.innerHTML = html || '';
+    if (empty) {
+      empty.style.display = msgs.length ? 'none' : 'flex';
+      if (!msgs.length) container.appendChild(empty);
+    }
+  }
+
+  if (mobileContainer) {
+    mobileContainer.innerHTML = html;
+  }
+
+  setTimeout(() => {
+    if (container) container.scrollTop = container.scrollHeight;
+    if (mobileContainer) mobileContainer.scrollTop = mobileContainer.scrollHeight;
+  }, 50);
+
+  requestAnimationFrame(() => lucide.createIcons());
 }
 
-if (msg.type === 'streaming') {
-  return `
-    <div class="flex gap-2.5 animate-slideUp">
-      <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center
-                  justify-center flex-shrink-0 mt-0.5">
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
-          <path stroke-linecap="round" stroke-linejoin="round"
-            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
-               a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-        </svg>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3">
-          <div class="msg-content text-sm text-zinc-200 leading-relaxed">
-            <span class="stream-cursor">▍</span>
+function renderMessage(msg) {
+  const time = new Date(msg.timestamp).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  if (msg.role === 'user') {
+    return `
+      <div class="flex justify-end gap-2 animate-slideUp">
+        <div class="flex flex-col items-end gap-1 max-w-[85%]">
+          <div class="bg-indigo-600 rounded-2xl rounded-tr-md px-4 py-2.5">
+            <p class="text-sm text-white leading-relaxed">${escapeHTML(msg.content)}</p>
+          </div>
+          <span class="text-xs text-zinc-700 px-1">${time}</span>
+        </div>
+        <div class="w-7 h-7 bg-indigo-700 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5">
+          ${state.user?.first_name?.[0]?.toUpperCase() || 'U'}
+        </div>
+      </div>`;
+  }
+
+  if (msg.type === 'loading') {
+    return `
+      <div class="flex gap-2.5 animate-slideUp" id="loadingMsg">
+        <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+        </div>
+        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3 max-w-[85%]">
+          <div class="flex items-center gap-1.5 mb-3">
+            <div class="skeleton h-3 w-24 rounded"></div>
+          </div>
+          <div class="space-y-2">
+            <div class="skeleton h-2.5 w-full rounded"></div>
+            <div class="skeleton h-2.5 w-4/5 rounded"></div>
+            <div class="skeleton h-2.5 w-3/5 rounded"></div>
+          </div>
+          <div class="flex items-center gap-1 mt-3">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
           </div>
         </div>
-        <div class="citation-area flex flex-wrap gap-1.5 mt-2 px-1"></div>
+      </div>`;
+  }
+
+  if (msg.type === 'streaming') {
+    return `
+      <div class="flex gap-2.5 animate-slideUp">
+        <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3">
+            <div class="msg-content text-sm text-zinc-200 leading-relaxed">
+              <span class="stream-cursor">▍</span>
+            </div>
+          </div>
+          <div class="citation-area flex flex-wrap gap-1.5 mt-2 px-1"></div>
+        </div>
+      </div>`;
+  }
+
+  const hasCitations = msg.citations?.length > 0;
+  const lc = typeof msg.content === 'string' ? msg.content.toLowerCase() : '';
+  const hasTable = lc.includes('table') && hasCitations;
+  const hasImage = lc.includes('figure') || lc.includes('image') || lc.includes('chart');
+
+  let extraContent = '';
+
+  if (hasTable) {
+    extraContent += `
+      <div class="mt-3 border border-zinc-700 rounded-xl overflow-hidden">
+        <div class="flex items-center gap-2 px-3 py-2 bg-zinc-800/80 border-b border-zinc-700">
+          <i data-lucide="table" class="w-3 h-3 text-violet-400"></i>
+          <span class="text-xs text-zinc-400 font-medium">Referenced Table</span>
+        </div>
+        <table class="chat-table">
+          <thead>
+            <tr><th>Source</th><th>Page</th><th>Relevance</th></tr>
+          </thead>
+          <tbody>
+            ${(msg.citations || []).map(c => `
+            <tr>
+              <td class="text-zinc-300">${escapeHTML(c.source_name || '')}</td>
+              <td>${c.page ?? '—'}</td>
+              <td><span class="text-emerald-400 text-xs">High</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  if (hasImage) {
+    extraContent += `
+      <div class="mt-3 flex items-center gap-3 bg-zinc-800/40 border border-zinc-700/50 rounded-xl p-3">
+        <div class="w-10 h-10 bg-zinc-800 rounded-lg flex items-center justify-center flex-shrink-0">
+          <i data-lucide="image" class="w-4 h-4 text-emerald-400"></i>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-zinc-300">Visual content detected</p>
+          <p class="text-xs text-zinc-600">A figure or chart was referenced on this page</p>
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="flex gap-2.5 animate-slideUp">
+      <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+      </div>
+      <div class="flex-1 min-w-0 max-w-[92%]">
+        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3 relative group">
+          <div class="msg-content text-sm text-zinc-200 leading-relaxed">${formatMarkdown(msg.content)}</div>
+          ${extraContent}
+          <button onclick="copyToClipboard(this, ${JSON.stringify(msg.content)})"
+            class="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 transition-all p-1.5 rounded-lg hover:bg-zinc-700">
+            <i data-lucide="copy" class="w-3 h-3"></i>
+          </button>
+        </div>
+        ${hasCitations ? `
+        <div class="flex flex-wrap gap-1.5 mt-2 px-1">
+          ${msg.citations.map(c => `
+            <span class="inline-flex items-center gap-1 text-xs bg-zinc-800 border border-zinc-700 text-zinc-500 px-2 py-0.5 rounded-full hover:border-indigo-500/40 hover:text-zinc-400 transition-colors cursor-default"
+              title="Page: ${c.page ?? 'N/A'}">
+              <i data-lucide="bookmark" class="w-2.5 h-2.5"></i>
+              ${escapeHTML(c.chunk_label)} · p.${c.page ?? '?'}
+            </span>`).join('')}
+        </div>` : ''}
+        <span class="text-xs text-zinc-700 px-1 mt-1 inline-block">${time}</span>
       </div>
     </div>`;
 }
@@ -1216,7 +1356,7 @@ function init() {
     apiInput.value = state.apiBase;
   }
 
-  lucide.createIcons();
+  try { lucide.createIcons(); } catch (_) {}
 }
 
 // ═══════════════════════════════════════════════
@@ -1258,7 +1398,7 @@ async function handleLogin(e) {
 async function handleRegister(e) {
   e.preventDefault();
 
-  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'https://multimodal-rag-system-oozj.onrender.comge';
+  state.apiBase = document.getElementById('apiBaseInput').value.trim() || 'https://multimodal-rag-system-oozj.onrender.com';
 
   const payload = {
     first_name: document.getElementById('regFirstName').value,
