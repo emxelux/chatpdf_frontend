@@ -63,59 +63,9 @@ async function apiUpload(file) {
   return data; // {status, document_id, saved_path, chunks_indexed}
 }
 
-async function streamGenerate(query, document_id, { onCitations, onToken, onDone, onError }) {
-  let response;
-  try {
-    response = await fetch(`${state.apiBase}/generation`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.token}`
-      },
-      body: JSON.stringify({ query, document_id })
-    });
-  } catch (err) {
-    throw new Error('Network error — is the backend running?');
-  }
-
-  if (!response.ok) {
-    let detail = `Generation failed (${response.status})`;
-    try { const d = await response.json(); detail = d?.detail || detail; } catch {}
-    throw new Error(detail);
-  }
-
-  const reader  = response.body.getReader();
-  const decoder = new TextDecoder();
-  let   buffer  = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    // SSE arrives as lines; split on \n\n (event boundary)
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop();               // keep any incomplete event in buffer
-
-    for (const part of parts) {
-      for (const line of part.split('\n')) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-
-        if (raw === '[DONE]') { onDone?.(); return; }
-
-        try {
-          const evt = JSON.parse(raw);
-          if (evt.type === 'citations') onCitations?.(evt.citations, evt.results_count);
-          if (evt.type === 'token')     onToken?.(evt.token);
-        } catch { /* malformed chunk — skip */ }
-      }
-    }
-  }
-
-  onDone?.();   // fallback if [DONE] wasn't sent
-}
+// NOTE: the backend's /generation endpoint returns a single JSON response
+// (see apiGenerate below), not a Server-Sent-Events token stream. There is
+// no SSE-based generate function here for that reason.
 
 async function apiGenerate(query, document_id) {
   const res = await fetch(`${state.apiBase}/generation`, {
@@ -649,25 +599,6 @@ function renderMessage(msg) {
       </div>`;
   }
 
-  if (msg.type === 'streaming') {
-    return `
-      <div class="flex gap-2.5 animate-slideUp">
-        <div class="w-7 h-7 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2.2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-          </svg>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-md px-4 py-3">
-            <div class="msg-content text-sm text-zinc-200 leading-relaxed">
-              <span class="stream-cursor">▍</span>
-            </div>
-          </div>
-          <div class="citation-area flex flex-wrap gap-1.5 mt-2 px-1"></div>
-        </div>
-      </div>`;
-  }
-
   const hasCitations = msg.citations?.length > 0;
   const lc = typeof msg.content === 'string' ? msg.content.toLowerCase() : '';
   const hasTable = lc.includes('table') && hasCitations;
@@ -815,73 +746,38 @@ async function sendMessage() {
   state.messages[docId].push(userMsg);
   appendChatMsg(userMsg);
 
-  // 2. Append the assistant bubble with a live cursor — no skeleton needed
-  const asstMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'streaming' };
+  // 2. Append a loading assistant bubble (backend returns one JSON blob, not an SSE
+  //    stream, so there are no tokens to trickle in — show a loading state instead)
+  const asstMsg = { role:'assistant', content:'', citations:[], timestamp:Date.now(), type:'loading' };
   state.messages[docId].push(asstMsg);
   appendChatMsg(asstMsg);
-
-  // Grab the live content div to update in-place as tokens arrive
-  const allMsgs    = document.querySelectorAll('#messages > div');
-  const streamEl   = allMsgs[allMsgs.length - 1]?.querySelector('.msg-content');
-  const citationEl = allMsgs[allMsgs.length - 1]?.querySelector('.citation-area');
 
   state.isGenerating = true;
   document.getElementById('sendBtn').disabled = true;
 
-  let fullText  = '';
-  let citations = [];
-  // Debounce markdown render: update DOM every ~40ms, not on every token
-  let renderScheduled = false;
-  function scheduleRender() {
-    if (renderScheduled) return;
-    renderScheduled = true;
-    setTimeout(() => {
-      if (streamEl) streamEl.innerHTML = formatMarkdown(fullText) + '<span class="stream-cursor">▍</span>';
-      renderScheduled = false;
-    }, 40);
-  }
-
   try {
-    await streamGenerate(query, docId, {
-      onCitations(cites) {
-        citations = cites;
-      },
-      onToken(token) {
-        fullText += token;
-        scheduleRender();
-      },
-      onDone() {
-        // Final render — full markdown, no cursor
-        if (streamEl) streamEl.innerHTML = formatMarkdown(fullText);
+    const res       = await apiGenerate(query, docId);
+    const fullText  = _normaliseAnswer(res.answer);
+    const citations = res.citations || [];
 
-        // Render citations
-        if (citationEl && citations.length) {
-          citationEl.innerHTML = citations.map(c => `
-            <span class="inline-flex items-center gap-1 text-xs bg-zinc-800 border border-zinc-700
-                         text-zinc-500 px-2 py-0.5 rounded-full cursor-default"
-                  title="Page: ${c.page ?? 'N/A'}">
-              <i data-lucide="bookmark" class="w-2.5 h-2.5"></i>
-              ${escapeHTML(c.chunk_label)} · p.${c.page ?? '?'}
-            </span>`).join('');
-          requestAnimationFrame(() => lucide.createIcons());
-        }
+    // Swap the loading skeleton for the real message
+    replaceLoadingMsg(fullText, citations);
 
-        // Persist final message to state
-        const idx = state.messages[docId]?.findLastIndex(m => m.type === 'streaming');
-        if (idx !== -1)
-          state.messages[docId][idx] = {
-            role:'assistant', content:fullText,
-            citations, timestamp:Date.now(), type:'text'
-          };
-      }
-    });
-
-  } catch (err) {
-    if (streamEl) streamEl.innerHTML = `<span class="text-red-400">Error: ${escapeHTML(err.message)}</span>`;
-    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'streaming');
+    // Persist final message to state
+    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
     if (idx !== -1)
       state.messages[docId][idx] = {
-        role:'assistant', content:`Error: ${err.message}`,
+        role:'assistant', content:fullText,
+        citations, timestamp:Date.now(), type:'text'
+      };
+
+  } catch (err) {
+    const txt = `Error: ${err.message}`;
+    replaceLoadingMsg(txt, []);
+    const idx = state.messages[docId]?.findLastIndex(m => m.type === 'loading');
+    if (idx !== -1)
+      state.messages[docId][idx] = {
+        role:'assistant', content:txt,
         citations:[], timestamp:Date.now(), type:'text'
       };
     showToast(err.message, 'error');
